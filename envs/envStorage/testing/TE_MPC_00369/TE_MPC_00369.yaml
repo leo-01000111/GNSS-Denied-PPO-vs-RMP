@@ -1,0 +1,74 @@
+world:
+  height: 20.0
+  width: 20.0
+  step_time: 0.1
+  sample_time: 0.1
+  offset:
+  - 0
+  - 0
+  collision_mode: stop
+  control_mode: auto
+robot:
+- kinematics:
+    name: diff
+  shape:
+    name: circle
+    radius: 0.2
+  state:
+  - 1.0
+  - 1.0
+  - 0
+  goal:
+  - 19.0
+  - 19.0
+  - 0
+  color: g
+  plot:
+    show_trajectory: true
+    show_goal: true
+obstacle:
+- number: 7
+  distribution:
+    name: manual
+  shape:
+  - name: circle
+    radius: 1.0
+  state:
+  - - 2.14
+    - 11.581
+  - - 5.073
+    - 9.865
+  - - 14.541
+    - 13.765
+  - - 4.743
+    - 5.872
+  - - 10.076
+    - 6.839
+  - - 14.526
+    - 8.724
+  - - 13.154
+    - 18.327
+- number: 4
+  distribution:
+    name: manual
+  shape:
+  - &id001
+    name: rectangle
+    length: 20.0
+    width: 0.2
+  - *id001
+  - *id001
+  - *id001
+  state:
+  - - 10.0
+    - 0.0
+    - 0.0
+  - - 20.0
+    - 10.0
+    - 1.5707963267948966
+  - - 10.0
+    - 20.0
+    - 0.0
+  - - 0.0
+    - 10.0
+    - 1.5707963267948966
