@@ -1,0 +1,24 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+.git.backup/
+RMPC/RDA_planner/.git_upstream/
+RMPC/RDA_planner/hooks/
+RMPC/RDA_planner/info/
+RMPC/RDA_planner/logs/
+RMPC/RDA_planner/objects/
+RMPC/RDA_planner/refs/
+RMPC/RDA_planner/HEAD
+RMPC/RDA_planner/config
+RMPC/RDA_planner/description
+RMPC/RDA_planner/index
+RMPC/RDA_planner/packed-refs
+
