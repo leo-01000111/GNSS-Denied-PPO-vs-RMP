@@ -22,3 +22,5 @@ RMPC/RDA_planner/description
 RMPC/RDA_planner/index
 RMPC/RDA_planner/packed-refs
 
+# Generated denial zone descriptors
+envs/envStorage/**/*_D.json

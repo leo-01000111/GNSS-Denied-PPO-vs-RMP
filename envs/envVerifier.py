@@ -17,7 +17,7 @@ from tkinter import ttk, messagebox
 
 import matplotlib.pyplot as plt
 import yaml
-from matplotlib.patches import Circle, Rectangle
+from matplotlib.patches import Circle, Rectangle, Patch
 from matplotlib.transforms import Affine2D
 
 ROOT = Path(__file__).resolve().parent
@@ -46,16 +46,21 @@ def load_env(purpose: str, model: str, idx: str):
     folder = ENV_ROOT / PURPOSE_DIR[purpose] / base
     json_path = folder / f"{base}.json"
     yaml_path = folder / f"{base}.yaml"
+    denier_path = folder / f"{base}_D.json"
     if not json_path.exists() or not yaml_path.exists():
         raise FileNotFoundError(f"Missing files in {folder}")
     with json_path.open("r", encoding="utf-8") as f:
         path = json.load(f)
     with yaml_path.open("r", encoding="utf-8") as f:
         world = yaml.safe_load(f)
-    return path, world
+    zone = None
+    if denier_path.exists():
+        with denier_path.open("r", encoding="utf-8") as f:
+            zone = json.load(f)
+    return path, world, zone
 
 
-def plot_env(path_points, world_dict):
+def plot_env(path_points, world_dict, zone):
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.set_aspect("equal", adjustable="box")
 
@@ -67,11 +72,18 @@ def plot_env(path_points, world_dict):
     ax.set_title("Environment Visualiser")
     ax.grid(True, linestyle=":", linewidth=0.5)
 
+    # Denial zone (drawn underneath everything else)
+    if zone:
+        zx, zy, zr = float(zone["x"]), float(zone["y"]), float(zone["r"])
+        denial = Circle((zx, zy), zr, color="#c5d5f5", alpha=0.35, zorder=0, clip_on=True)
+        denial.set_clip_box(ax.bbox)  # clip to world bounds
+        ax.add_patch(denial)
+
     # Draw path
     xs, ys = zip(*path_points)
-    ax.plot(xs, ys, color="C0", linewidth=1.5, label="reference path")
-    ax.scatter(xs[0], ys[0], color="green", s=50, label="start")
-    ax.scatter(xs[-1], ys[-1], color="red", s=50, label="goal")
+    ax.plot(xs, ys, color="C0", linewidth=1.5, label="reference path", zorder=2)
+    ax.scatter(xs[0], ys[0], color="green", s=50, label="start", zorder=3)
+    ax.scatter(xs[-1], ys[-1], color="red", s=50, label="goal", zorder=3)
 
     # Draw obstacles
     obstacles = world_dict.get("obstacle", [])
@@ -86,7 +98,7 @@ def plot_env(path_points, world_dict):
             if name == "circle":
                 radius = float(shape.get("radius", 1.0))
                 x, y = state[:2]
-                ax.add_patch(Circle((x, y), radius, color="tomato", alpha=0.5))
+                ax.add_patch(Circle((x, y), radius, color="tomato", alpha=0.5, zorder=4))
             elif name == "rectangle":
                 length = float(shape.get("length", 1.0))
                 width_rect = float(shape.get("width", 0.2))
@@ -97,6 +109,7 @@ def plot_env(path_points, world_dict):
                     width_rect,
                     facecolor="sandybrown",
                     alpha=0.6,
+                    zorder=4,
                 )
                 transform = Affine2D().rotate(theta).translate(x, y) + ax.transData
                 rect.set_transform(transform)
@@ -104,9 +117,13 @@ def plot_env(path_points, world_dict):
             elif name == "polygon":
                 # Basic polygon support; not expected in generated envs.
                 verts = shape.get("vertices", [])
-                ax.fill([v[0] for v in verts], [v[1] for v in verts], color="gray", alpha=0.5)
+                ax.fill([v[0] for v in verts], [v[1] for v in verts], color="gray", alpha=0.5, zorder=4)
 
-    ax.legend(loc="upper left")
+    handles, labels = ax.get_legend_handles_labels()
+    if zone:
+        handles.insert(0, Patch(color="#c5d5f5", alpha=0.35, label="GNSS denial"))
+        labels.insert(0, "GNSS denial")
+    ax.legend(handles, labels, loc="upper left")
     plt.show()
 
 
@@ -167,8 +184,8 @@ class VerifierUI(tk.Tk):
             messagebox.showwarning("Select ID", "No ID available for this purpose/model.")
             return
         try:
-            path_points, world_dict = load_env(purpose, model, idx)
-            plot_env(path_points, world_dict)
+            path_points, world_dict, zone = load_env(purpose, model, idx)
+            plot_env(path_points, world_dict, zone)
         except FileNotFoundError as e:
             messagebox.showerror("Missing files", str(e))
         except Exception as exc:  # noqa: BLE001

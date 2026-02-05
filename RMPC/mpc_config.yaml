@@ -1,0 +1,21 @@
+# Editable defaults for the RMPC controller.
+# These values mirror the arguments used in RDA-planner examples.
+controller:
+  receding: 10          # prediction horizon (smaller to reduce solver size)
+  process_num: 1        # parallel processes (1 to avoid Windows pipe issues)
+  iter_num: 1           # iterations per control cycle
+  obstacle_order: true  # sort obstacles by distance
+  ro1: 300              # penalty weights (see RDA_planner.rda_solver)
+  ro2: 1
+  max_edge_num: 4
+  max_obs_num: 11
+  slack_gain: 8
+
+robot_limits:
+  max_speed: [1.0, 1.0]    # linear, angular (match env limits)
+  max_acce:  [1.0, 1.0]    # linear, angular
+  dynamics: diff        # diff | omni | acker
+
+integration:
+  sample_time: null     # if null, use env.step_time
+  goal_threshold: 0.3
