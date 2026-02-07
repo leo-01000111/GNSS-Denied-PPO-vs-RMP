@@ -1,21 +1,35 @@
-# Editable defaults for the RMPC controller.
-# These values mirror the arguments used in RDA-planner examples.
 controller:
-  receding: 10          # prediction horizon (smaller to reduce solver size)
-  process_num: 1        # parallel processes (1 to avoid Windows pipe issues)
-  iter_num: 1           # iterations per control cycle
-  obstacle_order: true  # sort obstacles by distance
-  ro1: 300              # penalty weights (see RDA_planner.rda_solver)
-  ro2: 1
-  max_edge_num: 4
-  max_obs_num: 11
-  slack_gain: 8
-
-robot_limits:
-  max_speed: [1.0, 1.0]    # linear, angular (match env limits)
-  max_acce:  [1.0, 1.0]    # linear, angular
-  dynamics: diff        # diff | omni | acker
-
+  iter_num: 2
+  max_edge_num: 6
+  max_obs_num: 9
+  obstacle_order: true
+  process_num: 1
+  receding: 12
+  ro1: 4880.369683963839
+  ro2: 1.6595414593117224
+  slack_gain: 10
+  ws: 1.0
+  wu: 5.0
 integration:
-  sample_time: null     # if null, use env.step_time
-  goal_threshold: 0.3
+  goal_threshold: 0.5
+  sample_time: null
+  # The RDA-planner MPC primarily tracks the reference trajectory at a given ref_speed.
+  # If ref_speed stays high at the end of the path, the controller can settle into loops
+  # around the goal. We ramp speed down as we approach the goal to enforce convergence.
+  ref_speed_max: 0.8
+  ref_speed_min: 0.1
+  ref_speed_k: 0.6
+  stop_dist: 0.5
+robot_limits:
+  dynamics: diff
+  max_acce:
+  - 0.8
+  - 0.8
+  max_speed:
+  - 0.8
+  - 0.8
+tube:
+  gain_heading: 0.0
+  gain_pos: 0.0
+  gnss_noise_std: 0.0
+  radius: 0.6

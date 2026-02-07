@@ -18,7 +18,18 @@ from pathlib import Path
 from typing import Iterable, Tuple
 
 import irsim
-from RDA_planner.mpc import MPC
+
+# Prefer the vendored RDA-planner copy inside this repo to avoid picking up
+# unrelated local installs (e.g. from another checkout on disk).
+import sys
+
+_RDA_REPO_ROOT = Path(__file__).resolve().parent / "RDA_planner"
+if _RDA_REPO_ROOT.exists():
+    p = str(_RDA_REPO_ROOT)
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+from RDA_planner.mpc import MPC  # type: ignore  # noqa: E402
 
 CONFIG_PATH = Path(__file__).resolve().parent / "mpc_config.yaml"
 
@@ -34,11 +45,21 @@ class MPCConfig:
     max_edge_num: int
     max_obs_num: int
     slack_gain: float
+    ws: float
+    wu: float
     max_speed: Tuple[float, float]
     max_acce: Tuple[float, float]
     dynamics: str
     sample_time: float | None
     goal_threshold: float
+    ref_speed_max: float
+    ref_speed_min: float
+    ref_speed_k: float
+    stop_dist: float
+    tube_radius: float
+    tube_noise_std: float
+    tube_gain_pos: float
+    tube_gain_heading: float
 
     @staticmethod
     def from_yaml(path: Path) -> "MPCConfig":
@@ -48,6 +69,7 @@ class MPCConfig:
         ctrl = data.get("controller", {})
         limits = data.get("robot_limits", {})
         integ = data.get("integration", {})
+        tube = data.get("tube", {})
         return MPCConfig(
             receding=int(ctrl.get("receding", 20)),
             process_num=int(ctrl.get("process_num", 4)),
@@ -58,11 +80,21 @@ class MPCConfig:
             max_edge_num=int(ctrl.get("max_edge_num", 4)),
             max_obs_num=int(ctrl.get("max_obs_num", 11)),
             slack_gain=float(ctrl.get("slack_gain", 8)),
+            ws=float(ctrl.get("ws", 1.0)),
+            wu=float(ctrl.get("wu", 1.0)),
             max_speed=tuple(limits.get("max_speed", [10, 2])),
             max_acce=tuple(limits.get("max_acce", [10, 1])),
             dynamics=str(limits.get("dynamics", "diff")),
             sample_time=integ.get("sample_time", None),
             goal_threshold=float(integ.get("goal_threshold", 0.3)),
+            ref_speed_max=float(integ.get("ref_speed_max", 4.0)),
+            ref_speed_min=float(integ.get("ref_speed_min", 0.0)),
+            ref_speed_k=float(integ.get("ref_speed_k", 0.0)),
+            stop_dist=float(integ.get("stop_dist", float(integ.get("goal_threshold", 0.3)))),
+            tube_radius=float(tube.get("radius", 0.6)),
+            tube_noise_std=float(tube.get("gnss_noise_std", 0.0)),
+            tube_gain_pos=float(tube.get("gain_pos", 0.0)),
+            tube_gain_heading=float(tube.get("gain_heading", 0.0)),
         )
 
 
@@ -75,6 +107,7 @@ class MPCAgent:
         cfg_path = config_path or CONFIG_PATH
         self.cfg = MPCConfig.from_yaml(cfg_path)
         self._fallback = False
+        self.tube_radius = 0.0
 
         robot_info = env.get_robot_info()
         car_tuple = self._build_car_tuple(robot_info)
@@ -102,6 +135,8 @@ class MPCAgent:
                 max_edge_num=self.cfg.max_edge_num,
                 max_obs_num=self.cfg.max_obs_num,
                 slack_gain=self.cfg.slack_gain,
+                ws=self.cfg.ws,
+                wu=self.cfg.wu,
             )
         except PermissionError:
             # Windows or sandbox may block multiprocessing pipes; fall back.
@@ -117,6 +152,8 @@ class MPCAgent:
                 max_edge_num=self.cfg.max_edge_num,
                 max_obs_num=self.cfg.max_obs_num,
                 slack_gain=self.cfg.slack_gain,
+                ws=self.cfg.ws,
+                wu=self.cfg.wu,
             )
         except OverflowError:
             # Solver blew up; retry with lighter settings.
@@ -132,11 +169,19 @@ class MPCAgent:
                 max_edge_num=min(2, self.cfg.max_edge_num),
                 max_obs_num=min(8, self.cfg.max_obs_num),
                 slack_gain=self.cfg.slack_gain,
+                ws=self.cfg.ws,
+                wu=self.cfg.wu,
             )
 
     def _build_car_tuple(self, robot_info):
         car = namedtuple("car", "G h cone_type wheelbase max_speed max_acce dynamics")
-        wheelbase = robot_info.shape[2] if len(robot_info.shape) > 2 else 0
+        wheelbase = 0
+        try:
+            shp = robot_info.shape
+            if isinstance(shp, (list, tuple, np.ndarray)) and len(shp) > 2:
+                wheelbase = shp[2]
+        except Exception:
+            wheelbase = 0
         return car(
             robot_info.G,
             robot_info.h,
@@ -149,11 +194,25 @@ class MPCAgent:
 
     def control_step(self, state: np.ndarray, obstacles) -> Tuple[np.ndarray, dict]:
         """Compute one MPC action given robot state and obstacle list."""
+        obstacles = self._nearest_obstacles(obstacles, self.cfg.max_obs_num)
         if self._fallback or self.mpc is None:
             return self._pure_pursuit(state)
         try:
-            opt_vel, info = self.mpc.control(state[0:3], 4, obstacles)
+            state_mpc = np.array(state, dtype=float).reshape(3, 1)
+            # Speed scheduling: slow down near goal to avoid end-of-path orbiting.
+            g = np.asarray(self.env.robot.goal, dtype=float).reshape(-1)
+            dx = float(g[0]) - float(state_mpc[0, 0])
+            dy = float(g[1]) - float(state_mpc[1, 0])
+            dist_goal = float(np.hypot(dx, dy))
+            ref_speed = float(self.cfg.ref_speed_max)
+            if self.cfg.ref_speed_k > 0:
+                ref_speed = min(ref_speed, float(self.cfg.ref_speed_k) * dist_goal)
+            ref_speed = max(float(self.cfg.ref_speed_min), ref_speed)
+
+            opt_vel, info = self.mpc.control(state_mpc, ref_speed, obstacles)
             info["mode"] = "mpc"
+            info["ref_speed"] = ref_speed
+            info["dist_goal"] = dist_goal
         except OverflowError:
             self._fallback = True
             self.mpc = None
@@ -166,6 +225,21 @@ class MPCAgent:
         # Optional online tuning hook
         self.mpc.rda.assign_adjust_parameter(ro1=self.cfg.ro1, ro2=self.cfg.ro2)
         return opt_vel, info
+
+    def _nearest_obstacles(self, obstacles, k: int):
+        try:
+            def center(o):
+                c = getattr(o, "center", None)
+                if c is not None:
+                    arr = np.array(c).reshape(-1)
+                    return arr[0], arr[1]
+                return 0, 0
+
+            obstacles = list(obstacles)
+            obstacles.sort(key=lambda o: (center(o)[0] ** 2 + center(o)[1] ** 2))
+            return obstacles[:k]
+        except Exception:
+            return obstacles
 
     def _pure_pursuit(self, state):
         idx = getattr(self, "_pp_idx", 0)
@@ -216,6 +290,7 @@ class MPCAgent:
                 theta = float(np.arctan2(dy, dx)) if (dx != 0 or dy != 0) else 0.0
             arr.append(np.array([[x], [y], [theta]], dtype=float))
         return arr
+
 
 
 def load_reference_from_npy(npy_path: Path) -> list:
